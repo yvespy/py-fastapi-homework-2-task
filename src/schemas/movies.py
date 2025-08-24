@@ -1,19 +1,19 @@
-import datetime
-from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import List, Optional
+from datetime import datetime, date, timedelta
+from pydantic import BaseModel, Field, ConfigDict, field_validator, validator, constr
+from typing import List, Optional, Literal
 
 
 class MovieBase(BaseModel):
-    name: str
+    name: str = Field(max_length=255)
     date: datetime.date
     score: float = Field(ge=0, le=100)
     overview: str
-    status: str
+    status: Literal["Released", "Post Production", "In Production"]
     budget: float = Field(ge=0)
     revenue: float = Field(ge=0)
 
     @field_validator("date")
-    def validate_date(self, v: date):
+    def validate_date(self, v: datetime):
         if v > datetime.date.today() + datetime.timedelta(days=365):
             raise ValueError("Movie date cannot be more than 1 year in the future")
         return v
@@ -54,6 +54,12 @@ class MovieCreateDetailSchema(MovieBase):
     actors: list[str]
     languages: list[str]
 
+    @validator("country")
+    def validate_country(cls, v: str) -> str:
+        if len(v) != 3 or not v.isalpha():
+            raise ValueError("Country code must be exactly 3 alphabetic characters (ISO 3166-1 alpha-3)")
+        return v.upper()
+
 
 class MovieDetailSchema(MovieBase):
     country: CountrySchema
@@ -65,13 +71,27 @@ class MovieDetailSchema(MovieBase):
 
 
 class MovieUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    date: Optional[datetime.date] = None
-    score: Optional[float] = Field(None, ge=0, le=100)
-    overview: Optional[str] = None
-    status: Optional[str] = None
-    budget: Optional[float] = Field(None, ge=0)
-    revenue: Optional[float] = Field(None, ge=0)
+    name: constr(max_length=255) | None
+    date: date | None
+    score: float | None
+    overview: str | None
+    status: Literal["Released", "Post Production", "In Production"] | None
+    country: str | None
+    genres: List[str] | None
+    actors: List[str] | None
+    languages: List[str] | None
+
+    @validator("date")
+    def date_not_too_far(cls, v: date) -> date:
+        if v > date.today() + timedelta(days=365):
+            raise ValueError("Release date cannot be more than one year in the future")
+        return v
+
+    @validator("country")
+    def validate_country(cls, v: str) -> str:
+        if v and (len(v) != 3 or not v.isalpha()):
+            raise ValueError("Country code must be exactly 3 alphabetic characters (ISO 3166-1 alpha-3)")
+        return v.upper()
 
 
 class MovieListItemSchema(BaseModel):

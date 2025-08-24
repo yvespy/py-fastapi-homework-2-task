@@ -23,7 +23,7 @@ async def get_movies_route(
         raise HTTPException(status_code=404, detail="No movies found.")
 
     def build_url(p: int) -> str:
-        return f"/theater/movies/?page={p}&per_page={per_page}"
+        return f"/movies/?page={p}&per_page={per_page}"
 
     return {
         "movies": movies,
