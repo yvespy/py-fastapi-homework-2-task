@@ -1,7 +1,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from database.models import MovieModel, GenreModel, ActorModel, LanguageModel, CountryModel
@@ -9,61 +9,40 @@ from schemas import MovieDetailSchema, MovieUpdateRequest
 
 
 async def get_movie_by_id(db: AsyncSession, movie_id: int) -> MovieModel | None:
-    stmt = select(MovieModel).options(
-        selectinload(MovieModel.genres),
-        selectinload(MovieModel.actors),
-        selectinload(MovieModel.languages),
-        selectinload(MovieModel.country),
-    ).where(MovieModel.id == movie_id)
+    stmt = (
+        select(MovieModel)
+        .options(
+            selectinload(MovieModel.genres),
+            selectinload(MovieModel.actors),
+            selectinload(MovieModel.languages),
+            selectinload(MovieModel.country),
+        )
+        .where(MovieModel.id == movie_id)
+    )
 
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
 
-async def populate_genres(db: AsyncSession, movie: dict):
-    if not movie["genres"]:
-        return
-    genres = []
-    for genre in movie["genres"]:
-        genre = await get_or_create_genre(db, genre)
-        print(f"{genre.id=}")
-        genres.append(genre)
-    movie["genres"] = genres
+async def get_movies(db: AsyncSession, page: int, per_page: int):
+    offset = (page - 1) * per_page
 
+    result = await db.execute(
+        select(MovieModel)
+        .order_by(MovieModel.id.desc())
+        .offset(offset)
+        .limit(per_page)
+    )
+    movies = result.scalars().all()
 
-async def populate_actors(db: AsyncSession, movie: dict):
-    if not movie["actors"]:
-        return
-    actors = []
-    for actor in movie["actors"]:
-        actor = await get_or_create_actor(db, actor)
-        print(f"{actor.id=}")
-        actors.append(actor)
-    movie["actors"] = actors
+    total = await db.execute(select(func.count()).select_from(MovieModel))
+    total_items = total.scalar_one()
+    total_pages = (total_items + per_page - 1) // per_page
 
-
-async def populate_languages(db: AsyncSession, movie: dict):
-    if not movie["languages"]:
-        return
-    languages = []
-    for language in movie["languages"]:
-        language = await get_or_create_language(db, language)
-        print(f"{language.id=}")
-        languages.append(language)
-    movie["languages"] = languages
-
-
-async def populate_country(db: AsyncSession, movie: dict):
-    if not movie["country"]:
-        return
-    country = await get_or_create_country(db, movie["country"])
-    print(f"{country.id=}")
-    movie["country"] = country
+    return movies, total_items, total_pages
 
 
 async def create_movie(db: AsyncSession, movie: MovieDetailSchema) -> MovieModel:
-    print("create_movie")
-
     new_movie = movie.model_dump()
 
     await populate_genres(db, new_movie)
@@ -78,32 +57,19 @@ async def create_movie(db: AsyncSession, movie: MovieDetailSchema) -> MovieModel
     except IntegrityError as e:
         await db.rollback()
 
-        # Optional: narrow the error to unique constraint on name+date
-        if "unique constraint" in str(e.orig).lower() or 'duplicate key' in str(e.orig).lower():
+        if "unique constraint" in str(e.orig).lower() or "duplicate key" in str(e.orig).lower():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"A movie with the name '{movie.name}' and release date '{movie.date}' already exists."
+                detail=f"A movie with the name '{movie.name}' and release date '{movie.date}' already exists.",
             )
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to create movie due to a database integrity error."
+                detail="Failed to create movie due to a database integrity error.",
             )
     await db.refresh(new_movie)
 
     return await get_movie_by_id(db, new_movie.id)
-
-
-async def get_movies(db: AsyncSession):
-    result = await db.execute(select(MovieModel))
-    movies = result.scalars().all()
-    return movies
-
-
-async def get_movie(db: AsyncSession, movie_id: int):
-    result = await db.execute(select(MovieModel).where(MovieModel.id == movie_id))
-    movie = result.scalar_one_or_none()
-    return movie
 
 
 async def patch_movie(db: AsyncSession, update_data: MovieUpdateRequest, current_movie: MovieModel):
@@ -114,9 +80,46 @@ async def patch_movie(db: AsyncSession, update_data: MovieUpdateRequest, current
     return current_movie
 
 
-async def delete_a_movie(db: AsyncSession, movie):
+async def delete_a_movie(db: AsyncSession, movie: MovieModel):
     await db.delete(movie)
     await db.commit()
+
+
+async def populate_genres(db: AsyncSession, movie: dict):
+    if not movie["genres"]:
+        return
+    genres = []
+    for genre in movie["genres"]:
+        genre = await get_or_create_genre(db, genre)
+        genres.append(genre)
+    movie["genres"] = genres
+
+
+async def populate_actors(db: AsyncSession, movie: dict):
+    if not movie["actors"]:
+        return
+    actors = []
+    for actor in movie["actors"]:
+        actor = await get_or_create_actor(db, actor)
+        actors.append(actor)
+    movie["actors"] = actors
+
+
+async def populate_languages(db: AsyncSession, movie: dict):
+    if not movie["languages"]:
+        return
+    languages = []
+    for language in movie["languages"]:
+        language = await get_or_create_language(db, language)
+        languages.append(language)
+    movie["languages"] = languages
+
+
+async def populate_country(db: AsyncSession, movie: dict):
+    if not movie["country"]:
+        return
+    country = await get_or_create_country(db, movie["country"])
+    movie["country"] = country
 
 
 async def get_or_create_genre(db: AsyncSession, genre_name: str) -> GenreModel:

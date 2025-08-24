@@ -1,5 +1,5 @@
 import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import List, Optional
 
 
@@ -11,6 +11,12 @@ class MovieBase(BaseModel):
     status: str
     budget: float = Field(ge=0)
     revenue: float = Field(ge=0)
+
+    @field_validator("date")
+    def validate_date(self, v: date):
+        if v > datetime.date.today() + datetime.timedelta(days=365):
+            raise ValueError("Movie date cannot be more than 1 year in the future")
+        return v
 
 
 class CountrySchema(BaseModel):
